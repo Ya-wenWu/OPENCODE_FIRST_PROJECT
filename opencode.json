@@ -1,0 +1,9 @@
+{
+  "agent": {
+    "code-review": {
+      "mode": "subagent",
+      "description": "Review code for bugs, security, style, and best practices",
+      "prompt": "file://.github/prompts/code-review.prompt.md"
+    }
+  }
+}
