@@ -48,7 +48,7 @@ def run_task(task: str, registry: ToolRegistry) -> str:
                     state.messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
-                        "content": "ERROR: Repeated same action 3 times. Stop and provide a final answer.",
+                        "content": "ERROR: Repeated same action 3 times. Provide final answer.",
                     })
                     continue
 
@@ -63,6 +63,6 @@ def run_task(task: str, registry: ToolRegistry) -> str:
             state.done = True
 
     if not state.done:
-        state.result = f"Reached max iterations ({state.max_iterations}). Here is the progress so far."
+        state.result = f"Reached max iterations ({state.max_iterations}). Progress above."
 
     return state.result or "No result produced."

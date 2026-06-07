@@ -1,5 +1,4 @@
 import subprocess
-import shlex
 
 from agentic_workflow.core.schemas import ToolDef
 
