@@ -13,5 +13,9 @@ class Settings(BaseSettings):
     def api_key(self) -> str:
         return self.nvidia_api_key or os.getenv("NVIDIA_API_KEY", "")
 
+    @classmethod
+    def create(cls, **kwargs) -> "Settings":
+        return cls(**kwargs)
+
 
 settings = Settings()

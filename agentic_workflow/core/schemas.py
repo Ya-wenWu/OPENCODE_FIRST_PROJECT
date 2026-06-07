@@ -21,6 +21,5 @@ class AgentState(BaseModel):
     max_iterations: int = 10
     done: bool = False
     result: str | None = None
-    last_action: str | None = None
+    last_action: Any = None
     action_count: int = 0
-    loop_detected: bool = False

@@ -12,8 +12,16 @@ SYSTEM_PROMPT = """You are an autonomous coding agent. You have tools to help yo
 - Never repeat the same action with the same arguments more than once.
 - If a tool fails, try a different approach."""
 
+MAX_TASK_LENGTH = 32_768
+MAX_MESSAGES = 30
+
 
 def run_task(task: str, registry: ToolRegistry) -> str:
+    if not task.strip():
+        return "Task cannot be empty."
+    if len(task) > MAX_TASK_LENGTH:
+        task = task[:MAX_TASK_LENGTH] + "\n\n[TRUNCATED]"
+
     state = AgentState(
         task=task,
         messages=[{"role": "system", "content": SYSTEM_PROMPT},
@@ -24,7 +32,12 @@ def run_task(task: str, registry: ToolRegistry) -> str:
     while not state.done and state.iteration < state.max_iterations:
         state.iteration += 1
 
-        response = chat(state.messages, tools=registry.get_openai_schemas())
+        try:
+            response = chat(state.messages, tools=registry.get_openai_schemas())
+        except Exception as e:
+            state.done = True
+            state.result = f"LLM call failed after retries: {e}"
+            break
 
         if response.tool_calls:
             state.messages.append({
@@ -38,10 +51,11 @@ def run_task(task: str, registry: ToolRegistry) -> str:
             })
 
             for tc in response.tool_calls:
-                if tc["name"] == state.last_action:
+                action_key = (tc["name"], json.dumps(tc["arguments"], sort_keys=True))
+                if action_key == state.last_action:
                     state.action_count += 1
                 else:
-                    state.last_action = tc["name"]
+                    state.last_action = action_key
                     state.action_count = 1
 
                 if state.action_count >= 3:
@@ -53,14 +67,24 @@ def run_task(task: str, registry: ToolRegistry) -> str:
                     continue
 
                 result = registry.execute(tc["name"], tc["arguments"])
+                if result.success:
+                    content = result.model_dump_json()
+                else:
+                    content = f"TOOL_ERROR: {result.error}"
                 state.messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": result.model_dump_json(),
+                    "content": content,
                 })
         else:
             state.result = response.content
             state.done = True
+
+        if len(state.messages) > MAX_MESSAGES:
+            system = state.messages[0]
+            user = state.messages[1]
+            recent = state.messages[-(MAX_MESSAGES - 2):]
+            state.messages = [system, user] + recent
 
     if not state.done:
         state.result = f"Reached max iterations ({state.max_iterations}). Progress above."

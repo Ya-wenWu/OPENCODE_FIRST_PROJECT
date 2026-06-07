@@ -31,7 +31,8 @@ def test_agent_state_defaults():
     assert s.max_iterations == 10
     assert s.done is False
     assert s.result is None
-    assert s.loop_detected is False
+    assert s.last_action is None
+    assert s.action_count == 0
 
 
 def test_agent_state_custom_max_iter():
