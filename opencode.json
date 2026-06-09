@@ -3,7 +3,15 @@
     "code-review": {
       "mode": "subagent",
       "description": "Review code for bugs, security, style, and best practices",
-      "prompt": "file://.github/prompts/code-review.prompt.md"
+      "model": "nvidia/deepseek-ai/deepseek-v4-flash",
+      "temperature": 0.1,
+      "steps": 10,
+      "color": "warning",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      },
+      "prompt": "{file:.github/prompts/code-review.prompt.md}"
     }
   }
 }
