@@ -32,10 +32,12 @@ jobs:
       - name: Install dependencies
         run: pip install httpx==0.27.2
 
-      - name: Run AI Code Review (Gemini)
+      - name: Run AI Code Review (Gemini → NVIDIA → Groq)
         id: review
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           python .github/scripts/code_review.py /tmp/pr_diff.txt "$PR_TITLE" > /tmp/review_output.md 2>&1 || ec=$?

@@ -1,10 +1,16 @@
-"""AI Code Review script for GitHub Actions.
-Reads a PR diff, sends it to Gemini API for review, outputs structured feedback."""
+"""AI Code Review — Enterprise-grade review script for GitHub Actions.
+Primary: Google Gemini. Fallback: NVIDIA NIM → Groq."""
 
 import os
 import sys
 
 import httpx
+
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+NVIDIA_ENDPOINT = "https://api.build.nvidia.com/v1/chat/completions"
+NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash"
+GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 SYSTEM_PROMPT = """You are a Staff Software Engineer conducting a code review \
 at Google engineering standards.
@@ -30,7 +36,6 @@ at Google engineering standards.
 - Can it be simpler? Will others understand it quickly?
 - Dead code, unused imports/variables
 - Missing error handling or swallowed exceptions
-- Comments explain Why, not What
 
 ### Testing
 - Are there tests covering the change?
@@ -42,136 +47,111 @@ at Google engineering standards.
 - Consistent with surrounding code and project style
 - Names clearly express intent (variables, functions, classes)
 
-## Severity Labels
-
-| Prefix | Meaning |
-|--------|---------|
-| (none) | **Required** — must fix before LGTM |
-| `Suggestion:` | Should consider seriously |
-| `Nit:` | Minor polish, can ignore |
-
-## Output Format
-
-```
-## 🔴 Required
-- **file:line** — description
-  Suggestion/fix
-
-## 💡 Suggestions
-- ...
-
-## ✅ What Was Done Well
-- ...
-
-## Summary
-Brief overall assessment.
-```
+## Severity
+- (none): Required — must fix before LGTM
+- Suggestion: Should consider seriously
+- Nit: Minor polish, can ignore
 
 ## Rules
 - Be specific: quote exact lines, suggest concrete fixes
-- Prioritize: list required fixes first, suggestions second
-- Praise good code too — say what was done right
-- If no issues found, say "LGTM" with a brief summary
-- Keep comments professional and constructive
-- Remember: no perfect code, only better code"""
+- Praise good code too; if clean, say LGTM"""
 
 
-def read_diff(path: str) -> str:
-    with open(path) as f:
-        content = f.read()
-    if not content.strip():
-        return "(no diff)"
-    return content
-
-
-def call_gemini_api(api_key: str, diff: str, filename: str | None = None) -> str:
-    file_context = f"\n\n## Files Changed\n{filename}" if filename else ""
-
-    prompt = f"""Review the following code diff.
-
-{file_context}
-
-```diff
-{diff}
-```
-
-Provide a thorough code review following the checklist above."""
-
+def call_gemini(api_key: str, prompt: str) -> str | None:
     payload = {
-        "contents": [{
-            "parts": [
-                {"text": SYSTEM_PROMPT},
-                {"text": prompt},
-            ]
-        }],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 8192,
-        }
+        "contents": [{"parts": [{"text": SYSTEM_PROMPT}, {"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
     }
-
-    response = httpx.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.0-flash:generateContent",
+    resp = httpx.post(
+        GEMINI_ENDPOINT,
         params={"key": api_key},
         headers={"Content-Type": "application/json"},
         json=payload,
         timeout=120,
     )
-    response.raise_for_status()
-    data = response.json()
+    if resp.status_code == 429:
+        return None
+    resp.raise_for_status()
+    data = resp.json()
+    parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [{}])
+    return (parts[0].get("text", "") if parts else "") or None
 
-    candidates = data.get("candidates", [])
-    if not candidates:
-        return "⚠️ Gemini API returned no candidates."
 
-    text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-    return text if text else "⚠️ Empty response from Gemini."
+def call_openai_compat(endpoint: str, api_key: str, model: str, prompt: str) -> str | None:
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 8192,
+    }
+    resp = httpx.post(
+        endpoint,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=120,
+    )
+    if resp.status_code == 429:
+        return None
+    resp.raise_for_status()
+    data = resp.json()
+    choices = data.get("choices", [])
+    return (choices[0].get("message", {}).get("content", "") if choices else "") or None
+
+
+PROVIDERS = [
+    ("Gemini", call_gemini, None, None),
+    ("NVIDIA", call_openai_compat, NVIDIA_ENDPOINT, NVIDIA_MODEL),
+    ("Groq", call_openai_compat, GROQ_ENDPOINT, GROQ_MODEL),
+]
 
 
 def main():
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        print(
-            "⚠️ GOOGLE_API_KEY not available "
-            "(fork PR from external contributor). Skipping AI review."
-        )
+    gemini_key = os.environ.get("GOOGLE_API_KEY")
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    groq_key = os.environ.get("GROQ_API_KEY")
+
+    if not gemini_key and not nvidia_key and not groq_key:
+        print("⚠️ No API key available. Skipping AI review.")
         return
 
     if len(sys.argv) < 2:
-        print("Usage: code_review.py <diff_file> [filename_pattern]", file=sys.stderr)
+        print("Usage: code_review.py <diff_file> [title]", file=sys.stderr)
         sys.exit(1)
 
-    diff_path = sys.argv[1]
-    filename = sys.argv[2] if len(sys.argv) > 2 else None
-
-    if not os.path.isfile(diff_path):
-        print(f"❌ Diff file not found: {diff_path}", file=sys.stderr)
-        sys.exit(1)
-
-    diff = read_diff(diff_path)
-    if diff == "(no diff)":
+    with open(sys.argv[1]) as f:
+        diff = f.read()
+    if not diff.strip():
         print("✅ No diff to review.")
         return
-
     if len(diff) > 80000:
-        diff = diff[:80000] + "\n... (truncated, diff too large)"
+        diff = diff[:80000] + "\n... (truncated)"
 
-    try:
-        review = call_gemini_api(api_key, diff, filename)
-        print(review)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 429:
-            print("⚠️ Gemini API rate limit exceeded. Skipping AI review this time.")
-            return
-        print(f"❌ Gemini API error: {e.response.status_code} {e.response.text}", file=sys.stderr)
-        sys.exit(1)
-    except httpx.RequestError as e:
-        print(f"❌ Network error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}", file=sys.stderr)
-        sys.exit(1)
+    title = sys.argv[2] if len(sys.argv) > 2 else ""
+    prompt = f"## PR: {title}\n\n```diff\n{diff}\n```"
+
+    result = None
+    for name, fn, endpoint, model in PROVIDERS:
+        key = {"Gemini": gemini_key, "NVIDIA": nvidia_key, "Groq": groq_key}[name]
+        if not key:
+            continue
+        if endpoint and model:
+            result = fn(endpoint, key, model, prompt)
+        else:
+            result = fn(key, prompt)
+        if result is None:
+            print(f"⚠️ {name} rate limited, trying next...")
+        else:
+            print(f"✅ Reviewed by {name}")
+            break
+
+    if result is None:
+        print("⚠️ All providers rate limited. Skipping AI review this time.")
+        return
+
+    print(result)
 
 
 if __name__ == "__main__":
