@@ -6,8 +6,11 @@ Only the latest release receives security patches.
 
 ## Reporting a Vulnerability
 
-Open a GitHub Issue with `[SECURITY]` prefix (private). Do not file
-public issues for active vulnerabilities.
+Please report security vulnerabilities via GitHub's **Private Vulnerability Reporting**:
+
+https://github.com/Ya-wenWu/OPENCODE_FIRST_PROJECT/security/advisories
+
+Do not file public issues for active vulnerabilities.
 
 ## Response
 
