@@ -130,13 +130,32 @@ minimaxai/minimax-m2.7             # 辦公任務
 
 ---
 
+## 貢獻
+
+請見 [CONTRIBUTING.md](CONTRIBUTING.md) 與 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+
+---
+
 ## 安全性
+
+### 專案層級
 
 - **max_iterations=10** — 防止無限迴圈
 - **Loop Detection** — 同一動作重複 3 次自動終止
 - **30s 超時** — 每個 bash 指令最長 30 秒
 - **Error handling** — API 失敗自動重試（最多 3 次）
 - 所有工具在本地執行，不經第三方伺服器
+
+### GitHub 層級
+
+| 防護 | 狀態 |
+|------|------|
+| Secret scanning | ✅ 啟用 |
+| Push protection | ✅ 啟用 |
+| Dependabot alerts | ✅ 啟用 |
+| Gitleaks (CI) | ✅ 每 PR 掃描 |
+| Branch ruleset | ✅ 所有分支需 PR |
+| AI Code Review | ✅ Gemini 審查 |
 
 ---
 
