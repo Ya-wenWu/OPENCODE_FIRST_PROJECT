@@ -13,40 +13,62 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: anomalyco/opencode/github@latest
+      - name: Set git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Generate diff
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git diff "origin/${{ github.base_ref }}...HEAD" > /tmp/pr_diff.txt
+          echo "Diff size: $(wc -c < /tmp/pr_diff.txt) bytes"
+
+      - name: Install dependencies
+        run: pip install httpx==0.27.2
+
+      - name: Run AI Code Review (Gemini → NVIDIA → Groq)
+        id: review
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python .github/scripts/code_review.py /tmp/pr_diff.txt "$PR_TITLE" > /tmp/review_output.md 2>&1 || ec=$?
+          echo "Review exit code: ${ec:-0}"
+          echo "review_output=/tmp/review_output.md" >> "$GITHUB_ENV"
+          exit ${ec:-0}
+
+      - name: Post review comment
+        uses: actions/github-script@v7
         with:
-          model: opencode/deepseek-v4-flash-free
-          use_github_token: true
-          prompt: |
-            Review this pull request following Staff Engineer standards:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.review_output, 'utf8').substring(0, 65536);
+            const prNumber = context.payload.pull_request.number;
 
-            ## Scope & Correctness
-            - Is the change well-scoped (one CL, one thing)?
-            - Logic errors, edge cases, null/exception paths
-            - Race conditions or concurrency issues
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: prNumber,
+            });
+            const botComments = comments.filter(c =>
+              c.user.type === 'Bot' && c.body.includes('## Summary')
+            );
+            for (const c of botComments.slice(0, -1)) {
+              await github.rest.issues.deleteComment({
+                ...context.repo,
+                comment_id: c.id,
+              });
+            }
 
-            ## Security
-            - Injection vulnerabilities (shell, SQL, command)
-            - Hardcoded secrets or credentials
-            - Unsafe file operations or deserialization
-
-            ## Maintainability
-            - Dead code, unused imports/variables
-            - Error handling: are failures silent or logged?
-            - Can this be simpler?
-
-            ## Output Format
-            Provide structured feedback with:
-            - **Summary** (2-3 sentences)
-            - **Issues Found** (by severity: CRITICAL / MAJOR / MINOR)
-            - **Positive Highlights** (what was done well)
-
-            Be concise. If nothing noteworthy, say "LGTM — no blocking issues."
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: prNumber,
+              body,
+            });
