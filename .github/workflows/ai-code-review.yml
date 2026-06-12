@@ -29,6 +29,9 @@ jobs:
           git diff "origin/${{ github.base_ref }}...HEAD" > /tmp/pr_diff.txt
           echo "Diff size: $(wc -c < /tmp/pr_diff.txt) bytes"
 
+      - name: Install dependencies
+        run: pip install httpx==0.27.2
+
       - name: Run AI Code Review (Gemini)
         id: review
         env:
